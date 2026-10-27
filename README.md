@@ -1,189 +1,136 @@
 # Vigil AI Fraud Shield
 
-[![Status](https://img.shields.io/badge/Status-Completed-success?style=flat-square)](https://github.com/ayanliger/gke-turns10-hackathon-vigil)
-[![Hackathon](https://img.shields.io/badge/GKE%20Turns%2010-Honorable%20Mention-blue?style=flat-square&logo=google-cloud)](https://github.com/ayanliger/gke-turns10-hackathon-vigil)
-[![Demo](https://img.shields.io/badge/Demo-YouTube-red?style=flat-square&logo=youtube)](https://www.youtube.com/watch?v=S7xQgOoeFOw)
-[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](vigil-system/orchestrator_agent/Dockerfile) [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/) [![GKE](https://img.shields.io/badge/Google_Cloud-GKE-4285F4?logo=googlecloud&logoColor=white)](https://cloud.google.com/kubernetes-engine) [![Gemini 2.5 Flash](https://img.shields.io/badge/Gemini-2.5_Flash-8E75B2?logo=googlegemini&logoColor=white)](vigil-system/investigation_agent/agent.py) [![License MIT](https://img.shields.io/badge/License-MIT-3DA639?logo=opensourceinitiative&logoColor=white)](LICENSE)
 
-[![Google Cloud](https://img.shields.io/badge/Google%20Cloud-GKE-4285F4?style=flat-square&logo=google-cloud&logoColor=white)](https://cloud.google.com/kubernetes-engine)
-[![Gemini](https://img.shields.io/badge/Gemini-2.5%20Flash-8E75B2?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev/)
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Go](https://img.shields.io/badge/Go-1.23-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
+Vigil is a hackathon prototype that monitors transactions in [Bank of Anthos](https://github.com/GoogleCloudPlatform/bank-of-anthos), gathers account context and uses Gemini to assess fraud risk. Four agents run on GKE: a transaction monitor, an orchestrator, an investigator and an actuator. They interact with the banking application's databases through predefined SQL tools without patching its application code.
 
-**Vigil** is a proactive, hierarchical multi-agent system that enhances the security of microservice-based financial applications. It uses agentic AI to detect and mitigate financial fraud in real-time.
+Built for the GKE Turns 10 Hackathon 2025, where it received an [honorable mention](https://cloud.google.com/blog/topics/developers-practitioners/winners-and-highlights-from-gke-hackathon). [Watch the demo](https://www.youtube.com/watch?v=S7xQgOoeFOw).
 
-> 🏆 **Honorable Mention** — GKE Turns 10 Hackathon
+## Architecture
 
-📺 [**Watch the Demo**](https://www.youtube.com/watch?v=S7xQgOoeFOw) · 📦 [**View Repository**](https://github.com/ayanliger/gke-turns10-hackathon-vigil)
-
-## Architecture Overview
-
-Vigil is a decoupled multi-agent system where a central **Orchestrator Agent** coordinates specialized agents for monitoring, investigation, and enforcement. The system integrates with the [Bank of Anthos](https://github.com/GoogleCloudPlatform/bank-of-anthos) sample banking application.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              VIGIL SYSTEM                                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   ┌──────────────────┐         A2A          ┌──────────────────────┐        │
-│   │  Transaction     │ ───────────────────► │    Orchestrator      │        │
-│   │  Monitor Agent   │                      │    Agent             │        │
-│   │                  │                      │                      │        │
-│   │  (Python/asyncio)│                      │  (ADK LlmAgent +     │        │
-│   └────────┬─────────┘                      │   Gemini 2.5 Flash)  │        │
-│            │                                └───────────┬──────────┘        │
-│            │ REST                                 A2A   │   A2A             │
-│            │                           ┌────────────────┴────────┐          │
-│            ▼                           ▼                         ▼          │
-│   ┌──────────────────┐       ┌──────────────────┐     ┌─────────────────┐   │
-│   │  GenAI Toolbox   │       │  Investigation   │     │  Actuator       │   │
-│   │  Service         │◄──────│  Agent           │     │  Agent          │   │
-│   │                  │ REST  │                  │     │                 │   │
-│   │  (Go binary)     │◄──────│  (ADK LlmAgent)  │     │  (FastAPI)      │   │
-│   │                  │       └──────────────────┘     └────────┬────────┘   │
-│   │                  │                                         │ REST       │
-│   │                  │◄────────────────────────────────────────┘            │
-│   └────────┬─────────┘                                                      │
-│            │                                                                │
-│            │ PostgreSQL                                                     │
-│            ▼                                                                │
-│   ┌──────────────────────────────────────┐                                  │
-│   │  Bank of Anthos Databases            │                                  │
-│   │  (accounts-db, ledger-db)            │                                  │
-│   └──────────────────────────────────────┘                                  │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Monitor["Transaction Monitor"] -->|A2A alert| Orchestrator["Orchestrator: Gemini 2.5 Flash"]
+    Orchestrator -->|A2A investigation| Investigator["Investigation: Gemini 2.5 Flash"]
+    Investigator -->|Case file| Orchestrator
+    Orchestrator -->|A2A action| Actuator["Actuator: FastAPI"]
+    Monitor -->|REST| Toolbox["GenAI Toolbox: Go service"]
+    Investigator -->|REST| Toolbox
+    Actuator -->|REST| Toolbox
+    Toolbox --> Accounts["Accounts database"]
+    Toolbox --> Ledger["Ledger database"]
 ```
 
-## Components
+The [monitor](vigil-system/transaction_monitor_agent/agent.py) polls every 5 seconds by default and sends alerts for amounts strictly above `FRAUD_THRESHOLD` (default `1000.0`). The [investigator](vigil-system/investigation_agent/agent.py) fetches the account profile and the 50 most recent outgoing transactions before asking Gemini for a JSON risk score from 0 to 10 and a justification. The [orchestrator](vigil-system/orchestrator_agent/agent.py) delegates the investigation, reviews the case file and can ask the [actuator](vigil-system/actuator_agent/agent.py) to invoke `lock_account`.
 
-| Component | Technology Stack | Description |
-|-----------|------------------|-------------|
-| **Transaction Monitor** | Python, asyncio, A2A SDK | Continuously polls the ledger database for new transactions. Flags high-value transactions and sends alerts to the Orchestrator via A2A protocol. |
-| **Orchestrator Agent** | Google ADK (LlmAgent), Gemini 2.5 Flash, FastAPI, A2A | Central coordinator. Uses an LLM to analyze alerts, delegate investigations, compute risk scores, and decide on enforcement actions. |
-| **Investigation Agent** | Google ADK (LlmAgent), Gemini 2.5 Flash, FastAPI, A2A | Gathers context about flagged transactions (user profile, transaction history) and produces a risk assessment with justification. |
-| **Actuator Agent** | FastAPI, A2A SDK | Executes enforcement actions (e.g., account locking) by invoking tools on the GenAI Toolbox. |
-| **GenAI Toolbox** | Go binary, REST API, PostgreSQL | Provides secure, pre-defined database operations as REST endpoints. Agents invoke tools like `get_user_details`, `lock_account`, etc. |
+## Technical decisions
 
-## Key Features
+Polling keeps transaction detection outside the banking application's request path. The monitor uses an amount threshold to decide which transactions reach the LLM workflow, rather than sending every transaction for analysis. This introduces a polling delay and depends on the monitor's timestamp cursor.
 
-- **Hierarchical Multi-Agent System**: Specialized agents with clear separation of concerns, coordinated by a central orchestrator.
-- **LLM-Powered Decision Making**: The Orchestrator and Investigation agents use Gemini to reason about fraud risk.
-- **Risk-Gated Enforcement**: Actions are only taken when investigation risk scores exceed a configurable threshold.
-- **A2A Protocol**: Inter-agent communication follows the Agent-to-Agent protocol for structured message passing.
-- **Non-Invasive Integration**: Vigil monitors and protects Bank of Anthos without modifying its core application code.
+Orchestration and investigation use Google ADK `LlmAgent` with `gemini-2.5-flash`. Context collection in the investigator follows fixed database calls; Gemini produces the assessment from that context. The orchestrator exposes delegation as function tools backed by A2A messages, while the actuator executes the supported action without an LLM. This separates assessment from the database operation that changes account state.
 
-## Detection Flow
+Agent communication uses A2A message types over FastAPI endpoints. Database operations use the Toolbox REST interface at `/api/tool/<tool>/invoke`, not MCP. The SQL statements and parameters are declared in [the Toolbox configuration](vigil-system/genal_toolbox/toolbox-configmap.yaml), so agents select named operations rather than generate SQL.
 
-1. **Monitor**: Transaction Monitor detects a high-value transaction (default threshold: $1,000)
-2. **Alert**: Sends A2A message to Orchestrator with transaction details
-3. **Investigate**: Orchestrator delegates to Investigation Agent, which queries user profile and history
-4. **Assess**: Investigation Agent uses Gemini to produce a risk score (0-10) with justification
-5. **Decide**: Orchestrator evaluates risk score against threshold (default: 7)
-6. **Act**: If threshold exceeded, Orchestrator commands Actuator to lock the account
+The intended escalation boundary is `risk_score >= RISK_SCORE_THRESHOLD`, with a default of 7. The orchestrator prompt requests investigation before actuation, and Python code attempts fallback actuation when a parsed score meets the threshold but no successful actuator response was recorded. The response includes `tool_events`, the case file and the action result for inspection. The threshold is not a hard guard on every model-initiated actuator call; a below-threshold call can execute and is logged afterward.
 
 ## Deployment
 
-### Prerequisites
+The manifests preserve the hackathon environment's settings. Deployment requires a Google Cloud project with billing, a GKE cluster, Docker, authenticated `gcloud` and `kubectl`, and Bank of Anthos already running in the same namespace. The cluster must be able to pull from Artifact Registry. The shell examples use Bash and run from this repository's root with the intended project and Kubernetes context selected.
 
-- Google Cloud project with billing enabled
-- GKE cluster
-- `kubectl` configured for your cluster
-- Docker installed locally
-- Bank of Anthos deployed to the cluster
+Before deployment, align the database hosts, credentials and SQL with the running Bank of Anthos schema. In particular, the actuator sends `account_id`, but the supplied `lock_account` tool declares `ext_user_id`; reconcile this contract before exercising the action. Its SQL writes `ACCOUNT_LOCKED_BY_VIGIL` into `users.user_info`, so the effect of that marker on the banking application's behavior also needs verification. Kubernetes mounts `toolbox-configmap.yaml` over the image's `tools.yaml`; the ConfigMap is the configuration used by these manifests.
 
-### Quick Start
+### Configure credentials and images
+
+Copy the Gemini secret example and replace its placeholder with the API key:
 
 ```bash
-# 1. Configure Gemini API key
 cp vigil-system/gemini-api-key-secret.yaml.example vigil-system/gemini-api-key-secret.yaml
-# Edit the file with your actual API key
-
-# 2. Set up environment
-export PROJECT_ID=$(gcloud config get-value project)
-export REGION="us-central1"
-export REPO="vigil-repo"
-export IMAGE_PREFIX="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}"
-
-# 3. Create Artifact Registry repository
-gcloud artifacts repositories create vigil-repo \
-    --repository-format=docker \
-    --location=$REGION
-
-# 4. Configure Docker authentication
-gcloud auth configure-docker ${REGION}-docker.pkg.dev
-
-# 5. Build and push images
-docker build -t "${IMAGE_PREFIX}/genal-toolbox:latest" -f vigil-system/genal_toolbox/Dockerfile .
-docker build -t "${IMAGE_PREFIX}/transaction-monitor-agent:latest" -f vigil-system/transaction_monitor_agent/Dockerfile .
-docker build -t "${IMAGE_PREFIX}/orchestrator-agent:latest" -f vigil-system/orchestrator_agent/Dockerfile .
-docker build -t "${IMAGE_PREFIX}/investigation-agent:latest" -f vigil-system/investigation_agent/Dockerfile .
-docker build -t "${IMAGE_PREFIX}/actuator-agent:latest" -f vigil-system/actuator_agent/Dockerfile .
-
-docker push "${IMAGE_PREFIX}/genal-toolbox:latest"
-docker push "${IMAGE_PREFIX}/transaction-monitor-agent:latest"
-docker push "${IMAGE_PREFIX}/orchestrator-agent:latest"
-docker push "${IMAGE_PREFIX}/investigation-agent:latest"
-docker push "${IMAGE_PREFIX}/actuator-agent:latest"
-
-# 6. Deploy to GKE
-kubectl apply -f vigil-system/gemini-api-key-secret.yaml
-kubectl apply -f vigil-system/genal_toolbox/toolbox-configmap.yaml
-kubectl apply -f vigil-system/genal_toolbox/
-kubectl apply -f vigil-system/transaction_monitor_agent/
-kubectl apply -f vigil-system/orchestrator_agent/
-kubectl apply -f vigil-system/investigation_agent/
-kubectl apply -f vigil-system/actuator_agent/
-
-# 7. Verify
-kubectl get pods
 ```
 
-### Configuration
-
-| Environment Variable | Component | Default | Description |
-|---------------------|-----------|---------|-------------|
-| `FRAUD_THRESHOLD` | Transaction Monitor | 1000.0 | Minimum transaction amount to flag |
-| `POLL_INTERVAL` | Transaction Monitor | 5 | Seconds between ledger polls |
-| `RISK_SCORE_THRESHOLD` | Orchestrator | 7 | Minimum risk score to trigger enforcement |
-| `GEMINI_API_KEY` | Orchestrator, Investigation | — | Required for LLM agents |
-
-## Observing the System
+The generated secret file is ignored by Git. Set the registry location and image tag:
 
 ```bash
-# Watch all Vigil pods
-kubectl get pods -w
+export VIGIL_PROJECT_ID="$(gcloud config get-value project)"
+export VIGIL_REGION="us-central1"
+export VIGIL_REPO="vigil-repo"
+export VIGIL_IMAGE_PREFIX="${VIGIL_REGION}-docker.pkg.dev/${VIGIL_PROJECT_ID}/${VIGIL_REPO}"
+export VIGIL_IMAGE_TAG="$(git rev-parse --short HEAD)"
+```
 
-# Stream logs from specific agents
+Create the Artifact Registry repository if it does not exist, then configure Docker authentication:
+
+```bash
+gcloud artifacts repositories create "$VIGIL_REPO" \
+    --repository-format=docker --location="$VIGIL_REGION"
+gcloud auth configure-docker "${VIGIL_REGION}-docker.pkg.dev"
+```
+
+### Build and push images
+
+The Toolbox and investigator Dockerfiles expect their own directories as build contexts. The other three expect the repository root:
+
+```bash
+docker build -t "${VIGIL_IMAGE_PREFIX}/genal-toolbox:${VIGIL_IMAGE_TAG}" vigil-system/genal_toolbox
+docker build -t "${VIGIL_IMAGE_PREFIX}/investigation-agent:${VIGIL_IMAGE_TAG}" vigil-system/investigation_agent
+docker build -t "${VIGIL_IMAGE_PREFIX}/transaction-monitor-agent:${VIGIL_IMAGE_TAG}" -f vigil-system/transaction_monitor_agent/Dockerfile .
+docker build -t "${VIGIL_IMAGE_PREFIX}/orchestrator-agent:${VIGIL_IMAGE_TAG}" -f vigil-system/orchestrator_agent/Dockerfile .
+docker build -t "${VIGIL_IMAGE_PREFIX}/actuator-agent:${VIGIL_IMAGE_TAG}" -f vigil-system/actuator_agent/Dockerfile .
+
+for image in genal-toolbox investigation-agent transaction-monitor-agent orchestrator-agent actuator-agent; do
+    docker push "${VIGIL_IMAGE_PREFIX}/${image}:${VIGIL_IMAGE_TAG}"
+done
+```
+
+### Apply manifests
+
+Apply the secret, reconciled Toolbox configuration and services. The standalone `tools.yaml` is Toolbox input, not a Kubernetes resource, so it is not included in these commands:
+
+```bash
+kubectl apply -f vigil-system/gemini-api-key-secret.yaml
+kubectl apply -f vigil-system/genal_toolbox/toolbox-configmap.yaml
+for service in vigil-system/*/*_service.yaml; do
+    kubectl apply -f "$service"
+done
+```
+
+The checked-in deployments reference images from the original project. [Render their image fields locally](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_set/kubectl_set_image/) before applying them, using the registry and tag set above:
+
+```bash
+set -euo pipefail
+for component in genal_toolbox transaction_monitor_agent orchestrator_agent investigation_agent actuator_agent; do
+    image="${component//_/-}"
+    kubectl set image --local \
+        -f "vigil-system/${component}/${component}_deployment.yaml" \
+        "${image}=${VIGIL_IMAGE_PREFIX}/${image}:${VIGIL_IMAGE_TAG}" -o yaml |
+        kubectl apply -f -
+done
+```
+
+| Variable | Component | Default |
+|---|---|---|
+| `FRAUD_THRESHOLD` | Transaction Monitor | `1000.0`, strict amount comparison |
+| `POLL_INTERVAL` | Transaction Monitor | `5` seconds |
+| `RISK_SCORE_THRESHOLD` | Orchestrator | `7`, inclusive escalation threshold |
+| `GEMINI_API_KEY` | Orchestrator and Investigation | Required through the `gemini-api-key` secret |
+
+## Inspecting a run
+
+```bash
+kubectl get pods
 kubectl logs -f deployment/transaction-monitor-agent
 kubectl logs -f deployment/orchestrator-agent
 kubectl logs -f deployment/investigation-agent
 kubectl logs -f deployment/actuator-agent
 ```
 
-## Future Improvements
+For a transaction above the amount threshold, inspect the alert, investigation case file, numeric score and any actuator call. Check the actuator's returned status and the resulting database state, rather than treating a narrative summary or HTTP success as proof that the action succeeded. The three FastAPI agents expose `/health`, which reports process availability rather than an end-to-end database or Gemini check.
 
-- [ ] **True MCP Integration**: Replace REST calls to GenAI Toolbox with proper MCP protocol
-- [ ] **Streaming Investigation**: Use streaming responses for real-time investigation updates
-- [ ] **Enhanced Fraud Rules**: Implement velocity checks, geographic anomaly detection, behavioral patterns
-- [ ] **Observability**: Add OpenTelemetry tracing across agent communications
-- [ ] **Human-in-the-Loop**: Add approval workflow for high-stakes enforcement actions
-- [ ] **Feedback Loop**: Allow marking false positives to improve risk scoring over time
-- [ ] **Multi-Cluster Support**: Deploy agents across regions for resilience
+## Limitations
 
-## Technology Stack
+The monitor cursor, ADK sessions and cached case file are held in memory. The cursor starts at the current time when the monitor starts; durable event handling and isolation of the shared case-file cache between concurrent alerts are not implemented.
 
-- **Runtime**: Python 3.11, Go
-- **AI/ML**: Google ADK, Gemini 2.5 Flash
-- **Communication**: A2A Protocol (a2a-sdk), REST APIs
-- **Infrastructure**: Google Kubernetes Engine (GKE), Artifact Registry
-- **Databases**: PostgreSQL (via Bank of Anthos)
-- **Frameworks**: FastAPI, uvicorn
+Python dependencies are unpinned, and the Toolbox Dockerfile clones its upstream repository without fixing a revision. Rebuilding can therefore produce a different dependency set from the demo. This repository contains no automated test suite or measured fraud-detection accuracy. Human approval, false-positive feedback and distributed tracing remain possible extensions, not implemented behavior.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
-
-## Acknowledgements
-
-Developed for the **GKE 10th Birthday Hackathon**. Thanks to the Google Cloud team for the excellent SDKs and infrastructure that made this project possible.
+[MIT](LICENSE).
