@@ -15,15 +15,27 @@ flowchart TD
     Actuator -->|REST| Toolbox
     Toolbox --> Accounts["Accounts database"]
     Toolbox --> Ledger["Ledger database"]
+
+    classDef llm fill:#f3e8ff,stroke:#7e22ce,color:#581c87
+    classDef service fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef db fill:#f1f5f9,stroke:#64748b,color:#1e293b
+    class Orchestrator,Investigator llm
+    class Monitor,Actuator,Toolbox service
+    class Accounts,Ledger db
 ```
 
 ## Deployment
 
 Manifests preserve the hackathon environment and run from the repository root with Bash, `docker`, `gcloud`, and `kubectl` configured against the target cluster.
 
-- Prerequisites: a billed GCP project, a GKE cluster able to pull from Artifact Registry, and Bank of Anthos running in the same namespace.
-- Database alignment: reconcile database hosts, credentials, and SQL with your running Bank of Anthos schema before deploying; in particular, the [actuator](vigil-system/actuator_agent/agent.py) sends `account_id` while `lock_account` declares `ext_user_id` and writes `ACCOUNT_LOCKED_BY_VIGIL` to `users.user_info`.
-- Active config: Kubernetes mounts [toolbox-configmap.yaml](vigil-system/genal_toolbox/toolbox-configmap.yaml) over the image's `tools.yaml`, so edit the ConfigMap rather than the standalone YAML file.
+Prerequisites:
+
+- Billed GCP project with a GKE cluster able to pull from Artifact Registry.
+- Bank of Anthos running in the same namespace.
+- Reconciled database hosts, credentials, and SQL in [toolbox-configmap.yaml](vigil-system/genal_toolbox/toolbox-configmap.yaml) (Kubernetes mounts this ConfigMap over the image's `tools.yaml`, so edit the ConfigMap rather than `tools.yaml`).
+
+> [!WARNING]
+> Before deploying, reconcile [actuator](vigil-system/actuator_agent/agent.py) and `lock_account` in `toolbox-configmap.yaml`: the actuator sends `account_id`, while `lock_account` expects `ext_user_id` and writes `ACCOUNT_LOCKED_BY_VIGIL` to `users.user_info`.
 
 ### Configure credentials and registry
 
@@ -79,6 +91,8 @@ for component in genal_toolbox transaction_monitor_agent orchestrator_agent inve
         kubectl apply -f -
 done
 ```
+
+Key environment variables across deployments:
 
 | Variable | Component | Default |
 | --- | --- | --- |
